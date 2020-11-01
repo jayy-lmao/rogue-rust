@@ -4,30 +4,20 @@ use sdl2::event::Event;
 use sdl2::image::{InitFlag, LoadTexture};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
-use sdl2::rect::{Point, Rect};
 use sdl2::render::{Texture, WindowCanvas};
+use sdl2::rect::{Point, Rect};
 use std::time::Duration;
 
-type Sprite = Rect;
+use specs::prelude::*;
+
+mod components;
+use components::*;
+
+mod animator;
+mod physics;
 
 const PLAYER_MOVEMENT_SPEED: i32 = 10;
 
-#[derive(Debug, Clone, Copy)]
-pub enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-#[derive(Debug)]
-pub struct Player {
-    pub position: Point,
-    pub sprite: Sprite,
-    pub speed: i32,
-    pub direction: Direction,
-    pub current_frame: i32,
-}
 pub fn direction_spritesheet_row(direction: Direction) -> i32 {
     match direction {
         Direction::Down => 0,
@@ -35,6 +25,29 @@ pub fn direction_spritesheet_row(direction: Direction) -> i32 {
         Direction::Right => 2,
         Direction::Up => 3,
     }
+}
+
+pub fn create_character_animation_frames(
+    sprite_sheet: usize,
+    top_left_frame: Rect,
+    direction: Direction,
+) -> Vec<Sprite> {
+    let (frame_width, frame_height) = top_left_frame.size();
+    let y_offset = top_left_frame.y() + frame_height as i32 * direction_spritesheet_row(direction);
+
+    let mut frames: Vec<Sprite> = Vec::new();
+    for i in 0..3 {
+        frames.push(Sprite {
+            sprite_sheet,
+            region: Rect::new(
+                top_left_frame.x() + frame_width as i32 * i,
+                y_offset,
+                frame_width,
+                frame_height,
+            ),
+        });
+    }
+    return frames;
 }
 
 pub fn render(
@@ -72,14 +85,6 @@ pub fn render(
     Ok(())
 }
 
-pub fn update_player(player: &mut Player) {
-    match player.direction {
-        Direction::Right => player.position = player.position.offset(player.speed, 0),
-        Direction::Left => player.position = player.position.offset(-player.speed, 0),
-        Direction::Up => player.position = player.position.offset(0, -player.speed),
-        Direction::Down => player.position = player.position.offset(0, player.speed),
-    };
-}
 
 pub fn main() -> Result<(), String> {
     let sdl_context = sdl2::init()?;
@@ -99,19 +104,53 @@ pub fn main() -> Result<(), String> {
         .expect("Could not convert window to canvas");
 
     let texture_creator = canvas.texture_creator();
-    let texture = texture_creator.load_texture("assets/bardo.png")?;
+    let textures = [texture_creator.load_texture("assets/bardo.png")?];
 
-    let position = Point::new(-PLAYER_MOVEMENT_SPEED, 10);
-    let sprite = Rect::new(0, 0, 26, 36);
-    let mut event_pump = sdl_context.event_pump()?;
-    let mut i = 0;
-    let mut player = Player {
-        position,
-        sprite,
-        speed: 0,
+    let sprite_sheet: usize = 0;
+    let top_left_frame = Rect::new(0, 0, 26, 36);
+
+    let player_animation = MovementAnimation {
         current_frame: 0,
-        direction: Direction::Right,
+        up_frames: create_character_animation_frames(sprite_sheet, top_left_frame, Direction::Up),
+        down_frames: create_character_animation_frames(
+            sprite_sheet,
+            top_left_frame,
+            Direction::Down,
+        ),
+        left_frames: create_character_animation_frames(
+            sprite_sheet,
+            top_left_frame,
+            Direction::Left,
+        ),
+        right_frames: create_character_animation_frames(
+            sprite_sheet,
+            top_left_frame,
+            Direction::Right,
+        ),
     };
+
+let mut dispatcher = DispatcherBuilder::new()
+        .with(physics::Physics, "Physics", &[])
+        .with(animator::Animator, "Animator", &[])
+        .build();
+    let mut world = World::new();
+
+    dispatcher.setup(&mut world.res);
+
+    world
+        .create_entity()
+        .with(Position(Point::new(0, 0)))
+        .with(Velocity {
+            speed: 0,
+            direction: Direction::Right,
+        })
+        .with(player_animation.right_frames[0].clone())
+        .with(player_animation)
+        .build();
+
+
+    let mut i = 0;
+    let mut event_pump = sdl_context.event_pump()?;
     'running: loop {
         // Get Input
         for event in event_pump.poll_iter() {
@@ -180,10 +219,13 @@ pub fn main() -> Result<(), String> {
 
         // Update
         i = (i + 1) % 255;
-        update_player(&mut player);
+        dispatcher.dispatch(&mut world.res);
+        world.maintain();
+
         if player.speed > 0 {
             player.current_frame = (player.current_frame + 1) % 3;
         };
+
 
         // Render
         render(&mut canvas, Color::RGB(i, 64, 255 - i), &texture, &player)?;
