@@ -12,7 +12,7 @@ type Sprite = Rect;
 
 const PLAYER_MOVEMENT_SPEED: i32 = 10;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Direction {
     Up,
     Down,
@@ -26,6 +26,15 @@ pub struct Player {
     pub sprite: Sprite,
     pub speed: i32,
     pub direction: Direction,
+    pub current_frame: i32,
+}
+pub fn direction_spritesheet_row(direction: Direction) -> i32 {
+    match direction {
+        Direction::Down => 0,
+        Direction::Left => 1,
+        Direction::Right => 2,
+        Direction::Up => 3,
+    }
 }
 
 pub fn render(
@@ -38,7 +47,18 @@ pub fn render(
     canvas.clear();
 
     let (width, height) = canvas.output_size()?;
+    let (frame_width, frame_height) = player.sprite.size();
 
+    let current_frame = Rect::new(
+        // Frame heights for the cut out from sprite sheet
+        // Current frame for animation
+        player.sprite.x() + frame_width as i32 * player.current_frame,
+        player.sprite.y() + frame_height as i32 * direction_spritesheet_row(player.direction),
+        frame_width,
+        frame_height,
+    );
+
+    // Makes center of screen 0,0
     let screen_position = player.position + Point::new(width as i32 / 2, height as i32 / 2);
 
     let screen_rect = Rect::from_center(
@@ -47,7 +67,7 @@ pub fn render(
         player.sprite.height(),
     );
 
-    canvas.copy(&texture, player.sprite, screen_rect)?;
+    canvas.copy(&texture, current_frame, screen_rect)?;
     canvas.present();
     Ok(())
 }
@@ -89,6 +109,7 @@ pub fn main() -> Result<(), String> {
         position,
         sprite,
         speed: 0,
+        current_frame: 0,
         direction: Direction::Right,
     };
     'running: loop {
@@ -160,6 +181,9 @@ pub fn main() -> Result<(), String> {
         // Update
         i = (i + 1) % 255;
         update_player(&mut player);
+        if player.speed > 0 {
+            player.current_frame = (player.current_frame + 1) % 3;
+        };
 
         // Render
         render(&mut canvas, Color::RGB(i, 64, 255 - i), &texture, &player)?;
