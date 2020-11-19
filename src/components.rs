@@ -31,7 +31,7 @@ pub struct Sprite {
 #[derive(Component, Debug)]
 #[storage(VecStorage)]
 pub struct MovementAnimation {
-    pub current_frame: i32,
+    pub current_frame: usize,
     pub up_frames: Vec<Sprite>,
     pub down_frames: Vec<Sprite>,
     pub left_frames: Vec<Sprite>,

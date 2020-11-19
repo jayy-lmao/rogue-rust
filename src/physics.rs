@@ -7,8 +7,6 @@ pub struct Physics;
 impl<'a> System<'a> for Physics {
     type SystemData = (WriteStorage<'a, Position>, ReadStorage<'a, Velocity>);
 
-
-
     fn run(&mut self, mut data: Self::SystemData) {
         use self::Direction::*;
         // Look up "rust irrefutable patterns" and use them here.

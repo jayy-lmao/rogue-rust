@@ -1,5 +1,9 @@
 extern crate sdl2;
 
+mod components;
+mod animator;
+mod physics;
+
 use sdl2::event::Event;
 use sdl2::image::{InitFlag, LoadTexture};
 use sdl2::keyboard::Keycode;
@@ -7,14 +11,9 @@ use sdl2::pixels::Color;
 use sdl2::render::{Texture, WindowCanvas};
 use sdl2::rect::{Point, Rect};
 use std::time::Duration;
-
 use specs::prelude::*;
 
-mod components;
 use components::*;
-
-mod animator;
-mod physics;
 
 const PLAYER_MOVEMENT_SPEED: i32 = 10;
 
@@ -60,8 +59,8 @@ pub fn render(
     canvas.clear();
 
     let (width, height) = canvas.output_size()?;
-    let (frame_width, frame_height) = player.sprite.size();
 
+    let (frame_width, frame_height) = player.sprite.size();
     let current_frame = Rect::new(
         // Frame heights for the cut out from sprite sheet
         // Current frame for animation
@@ -73,7 +72,6 @@ pub fn render(
 
     // Makes center of screen 0,0
     let screen_position = player.position + Point::new(width as i32 / 2, height as i32 / 2);
-
     let screen_rect = Rect::from_center(
         screen_position,
         player.sprite.width(),
@@ -81,7 +79,9 @@ pub fn render(
     );
 
     canvas.copy(&texture, current_frame, screen_rect)?;
+
     canvas.present();
+
     Ok(())
 }
 
@@ -104,38 +104,42 @@ pub fn main() -> Result<(), String> {
         .expect("Could not convert window to canvas");
 
     let texture_creator = canvas.texture_creator();
+
+    // Dispatcher
+    let mut dispatcher = DispatcherBuilder::new()
+        .with(physics::Physics, "Physics", &[])
+        .with(animator::Animator, "Animator", &[])
+        .build();
+
+    let mut world = World::new();
+    dispatcher.setup(&mut world.res);
+
     let textures = [texture_creator.load_texture("assets/bardo.png")?];
 
-    let sprite_sheet: usize = 0;
-    let top_left_frame = Rect::new(0, 0, 26, 36);
+    let player_spritesheet: usize = 0;
+    let player_top_left_frame = Rect::new(0, 0, 26, 36);
 
     let player_animation = MovementAnimation {
         current_frame: 0,
-        up_frames: create_character_animation_frames(sprite_sheet, top_left_frame, Direction::Up),
+        up_frames: create_character_animation_frames(player_spritesheet, player_top_left_frame, Direction::Up),
         down_frames: create_character_animation_frames(
-            sprite_sheet,
-            top_left_frame,
+            player_spritesheet,
+            player_top_left_frame,
             Direction::Down,
         ),
         left_frames: create_character_animation_frames(
-            sprite_sheet,
-            top_left_frame,
+            player_spritesheet,
+            player_top_left_frame,
             Direction::Left,
         ),
         right_frames: create_character_animation_frames(
-            sprite_sheet,
-            top_left_frame,
+            player_spritesheet,
+            player_top_left_frame,
             Direction::Right,
         ),
     };
 
-let mut dispatcher = DispatcherBuilder::new()
-        .with(physics::Physics, "Physics", &[])
-        .with(animator::Animator, "Animator", &[])
-        .build();
-    let mut world = World::new();
 
-    dispatcher.setup(&mut world.res);
 
     world
         .create_entity()
