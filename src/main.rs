@@ -99,7 +99,8 @@ pub fn main() -> Result<(), String> {
         .expect("Could not convert window to canvas");
 
     let texture_creator = canvas.texture_creator();
-    let texture = texture_creator.load_texture("assets/bardo.png")?;
+    let texture_bytes = include_bytes!("../assets/bardo.png");
+    let texture = texture_creator.load_texture_bytes(texture_bytes)?;
 
     let position = Point::new(-PLAYER_MOVEMENT_SPEED, 10);
     let sprite = Rect::new(0, 0, 26, 36);
