@@ -1,4 +1,8 @@
-extern crate sdl2;
+mod animator;
+mod components;
+mod keyboard;
+mod physics;
+mod renderer;
 
 use sdl2::event::Event;
 use sdl2::image::{InitFlag, LoadTexture};
@@ -6,28 +10,18 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::{Point, Rect};
 use sdl2::render::{Texture, WindowCanvas};
+use specs::prelude::*;
 use std::time::Duration;
 
-type Sprite = Rect;
+use components::*;
 
 const PLAYER_MOVEMENT_SPEED: i32 = 10;
 
-#[derive(Debug, Clone, Copy)]
-pub enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
+pub enum MovementCommand {
+    Stop,
+    Move(Direction),
 }
 
-#[derive(Debug)]
-pub struct Player {
-    pub position: Point,
-    pub sprite: Sprite,
-    pub speed: i32,
-    pub direction: Direction,
-    pub current_frame: i32,
-}
 pub fn direction_spritesheet_row(direction: Direction) -> i32 {
     match direction {
         Direction::Down => 0,
@@ -37,48 +31,27 @@ pub fn direction_spritesheet_row(direction: Direction) -> i32 {
     }
 }
 
-pub fn render(
-    canvas: &mut WindowCanvas,
-    color: Color,
-    texture: &Texture,
-    player: &Player,
-) -> Result<(), String> {
-    canvas.set_draw_color(color);
-    canvas.clear();
+pub fn create_character_animation_frames(
+    sprite_sheet: usize,
+    top_left_frame: Rect,
+    direction: Direction,
+) -> Vec<Sprite> {
+    let (frame_width, frame_height) = top_left_frame.size();
+    let y_offset = top_left_frame.y() + frame_height as i32 * direction_spritesheet_row(direction);
 
-    let (width, height) = canvas.output_size()?;
-    let (frame_width, frame_height) = player.sprite.size();
-
-    let current_frame = Rect::new(
-        // Frame heights for the cut out from sprite sheet
-        // Current frame for animation
-        player.sprite.x() + frame_width as i32 * player.current_frame,
-        player.sprite.y() + frame_height as i32 * direction_spritesheet_row(player.direction),
-        frame_width,
-        frame_height,
-    );
-
-    // Makes center of screen 0,0
-    let screen_position = player.position + Point::new(width as i32 / 2, height as i32 / 2);
-
-    let screen_rect = Rect::from_center(
-        screen_position,
-        player.sprite.width(),
-        player.sprite.height(),
-    );
-
-    canvas.copy(&texture, current_frame, screen_rect)?;
-    canvas.present();
-    Ok(())
-}
-
-pub fn update_player(player: &mut Player) {
-    match player.direction {
-        Direction::Right => player.position = player.position.offset(player.speed, 0),
-        Direction::Left => player.position = player.position.offset(-player.speed, 0),
-        Direction::Up => player.position = player.position.offset(0, -player.speed),
-        Direction::Down => player.position = player.position.offset(0, player.speed),
-    };
+    let mut frames: Vec<Sprite> = Vec::new();
+    for i in 0..3 {
+        frames.push(Sprite {
+            sprite_sheet,
+            region: Rect::new(
+                top_left_frame.x() + frame_width as i32 * i,
+                y_offset,
+                frame_width,
+                frame_height,
+            ),
+        });
+    }
+    return frames;
 }
 
 pub fn main() -> Result<(), String> {
@@ -99,21 +72,66 @@ pub fn main() -> Result<(), String> {
         .expect("Could not convert window to canvas");
 
     let texture_creator = canvas.texture_creator();
-    let texture_bytes = include_bytes!("../assets/bardo.png");
-    let texture = texture_creator.load_texture_bytes(texture_bytes)?;
 
-    let position = Point::new(-PLAYER_MOVEMENT_SPEED, 10);
-    let sprite = Rect::new(0, 0, 26, 36);
-    let mut event_pump = sdl_context.event_pump()?;
-    let mut i = 0;
-    let mut player = Player {
-        position,
-        sprite,
-        speed: 0,
+    // Dispatcher
+    let mut dispatcher = DispatcherBuilder::new()
+        .with(keyboard::Keyboard, "Keyboard", &[])
+        .with(physics::Physics, "Physics", &["Keyboard"])
+        .with(animator::Animator, "Animator", &["Keyboard"])
+        .build();
+
+    let mut world = World::new();
+    dispatcher.setup(&mut world.res);
+    renderer::SystemData::setup(&mut world.res);
+
+    let movement_command: Option<MovementCommand> = None;
+    world.add_resource(movement_command);
+
+    let textures = [texture_creator.load_texture("assets/bardo.png")?];
+
+    let player_spritesheet: usize = 0;
+    let player_top_left_frame = Rect::new(0, 0, 26, 36);
+
+    let player_animation = MovementAnimation {
         current_frame: 0,
-        direction: Direction::Right,
+        up_frames: create_character_animation_frames(
+            player_spritesheet,
+            player_top_left_frame,
+            Direction::Up,
+        ),
+        down_frames: create_character_animation_frames(
+            player_spritesheet,
+            player_top_left_frame,
+            Direction::Down,
+        ),
+        left_frames: create_character_animation_frames(
+            player_spritesheet,
+            player_top_left_frame,
+            Direction::Left,
+        ),
+        right_frames: create_character_animation_frames(
+            player_spritesheet,
+            player_top_left_frame,
+            Direction::Right,
+        ),
     };
+
+    world
+        .create_entity()
+        .with(KeyboardControlled)
+        .with(Position(Point::new(0, 0)))
+        .with(Velocity {
+            speed: 0,
+            direction: Direction::Right,
+        })
+        .with(player_animation.right_frames[0].clone())
+        .with(player_animation)
+        .build();
+
+    let mut i = 0;
+    let mut event_pump = sdl_context.event_pump()?;
     'running: loop {
+        let mut movement_command = None;
         // Get Input
         for event in event_pump.poll_iter() {
             match event {
@@ -127,34 +145,22 @@ pub fn main() -> Result<(), String> {
                     keycode: Some(Keycode::Right),
                     repeat: false,
                     ..
-                } => {
-                    player.speed = PLAYER_MOVEMENT_SPEED;
-                    player.direction = Direction::Right;
-                }
+                } => movement_command = Some(MovementCommand::Move(Direction::Right)),
                 Event::KeyDown {
                     keycode: Some(Keycode::Left),
                     repeat: false,
                     ..
-                } => {
-                    player.speed = PLAYER_MOVEMENT_SPEED;
-                    player.direction = Direction::Left;
-                }
+                } => movement_command = Some(MovementCommand::Move(Direction::Left)),
                 Event::KeyDown {
                     keycode: Some(Keycode::Up),
                     repeat: false,
                     ..
-                } => {
-                    player.speed = PLAYER_MOVEMENT_SPEED;
-                    player.direction = Direction::Up;
-                }
+                } => movement_command = Some(MovementCommand::Move(Direction::Up)),
                 Event::KeyDown {
                     keycode: Some(Keycode::Down),
                     repeat: false,
                     ..
-                } => {
-                    player.speed = PLAYER_MOVEMENT_SPEED;
-                    player.direction = Direction::Down;
-                }
+                } => movement_command = Some(MovementCommand::Move(Direction::Down)),
                 Event::KeyUp {
                     keycode: Some(Keycode::Up),
                     repeat: false,
@@ -174,22 +180,25 @@ pub fn main() -> Result<(), String> {
                     keycode: Some(Keycode::Right),
                     repeat: false,
                     ..
-                } => player.speed = 0,
+                } => movement_command = Some(MovementCommand::Stop),
                 _ => {}
             }
         }
 
+        *world.write_resource() = movement_command;
+
         // Update
         i = (i + 1) % 255;
-        update_player(&mut player);
-        if player.speed > 0 {
-            player.current_frame = (player.current_frame + 1) % 3;
-        };
+        dispatcher.dispatch(&mut world.res);
+        world.maintain();
 
-        // Render
-        render(&mut canvas, Color::RGB(i, 64, 255 - i), &texture, &player)?;
-
-        // The rest of the game loop goes here...
+        //Render
+        renderer::render(
+            &mut canvas,
+            Color::RGB(i, 64, 255 - i),
+            &textures,
+            world.system_data(),
+        )?;
 
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
