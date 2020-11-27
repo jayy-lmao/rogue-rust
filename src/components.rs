@@ -46,3 +46,7 @@ pub struct Player {
     pub direction: Direction,
     pub current_frame: i32,
 }
+
+#[derive(Component, Debug, Default)]
+#[storage(VecStorage)]
+pub struct KeyboardControlled;
